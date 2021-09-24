@@ -557,6 +557,7 @@ accept_function(void *arg, struct tcp_pcb *newpcb, err_t err)
 
   if (newpcb == NULL) {
     /* out-of-pcbs during connect: pass on this error to the application */
+    printf("ERROR %s(%d) newpcb == NULL", __FILE__, __LINE__);
     if (sys_mbox_trypost(&conn->acceptmbox, lwip_netconn_err_to_msg(ERR_ABRT)) == ERR_OK) {
       /* Register event with callback */
       API_EVENT(conn, NETCONN_EVT_RCVPLUS, 0);
@@ -572,6 +573,7 @@ accept_function(void *arg, struct tcp_pcb *newpcb, err_t err)
    * the new socket is unknown. newconn->socket is marked as -1. */
   newconn = netconn_alloc(conn->type, conn->callback);
   if (newconn == NULL) {
+    printf("ERROR %s(%d) newconn == NULL", __FILE__, __LINE__);
     /* outof netconns: pass on this error to the application */
     if (sys_mbox_trypost(&conn->acceptmbox, lwip_netconn_err_to_msg(ERR_ABRT)) == ERR_OK) {
       /* Register event with callback */

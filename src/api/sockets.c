@@ -37,7 +37,10 @@
  *
  */
 
+#include "esp_err.h"
+#include "esp_log.h"
 #include "lwip/opt.h"
+#include "lwip/err.h"
 
 #if LWIP_SOCKET /* don't build if not configured for use in lwipopts.h */
 
@@ -282,7 +285,18 @@ static struct lwip_select_cb *select_cb_list;
 
 #define sock_set_errno(sk, e) do { \
   const int sockerr = (e); \
+  if (sockerr) { \
+     ESP_LOGE("lwip", "%s(%d): sock_set_errno(%d)", __FUNCTION__, __LINE__, sockerr); \
+  } \
   set_errno(sockerr); \
+} while (0)
+
+#define _set_errno(e) do { \
+  const int err = (e); \
+  if (err) { \
+     ESP_LOGE("lwip", "%s(%d): _set_errno(%d)", __FUNCTION__, __LINE__, err); \
+  } \
+  set_errno(err); \
 } while (0)
 
 /* Forward declaration of some functions */
@@ -343,7 +357,7 @@ sock_inc_used(struct lwip_sock *sock)
   int ret;
 #if !ESP_LWIP_LOCK
   SYS_ARCH_DECL_PROTECT(lev);
-#endif /* !ESP_LWIP_LOCK */  
+#endif /* !ESP_LWIP_LOCK */
 
   LWIP_ASSERT("sock != NULL", sock != NULL);
 
@@ -362,9 +376,9 @@ sock_inc_used(struct lwip_sock *sock)
   }
 #if ESP_LWIP_LOCK
   SYS_ARCH_UNPROTECT_SOCK(sock);
-#else 
+#else
   SYS_ARCH_UNPROTECT(lev);
-#endif /* ESP_LWIP_LOCK */  
+#endif /* ESP_LWIP_LOCK */
   return ret;
 }
 
@@ -376,7 +390,7 @@ sock_inc_used_locked(struct lwip_sock *sock)
 
 #if ESP_LWIP_LOCK
   SYS_ARCH_PROTECT_SOCK(sock);
-#endif /* ESP_LWIP_LOCK */  
+#endif /* ESP_LWIP_LOCK */
   if (sock->fd_free_pending) {
     LWIP_ASSERT("sock->fd_used != 0", sock->fd_used != 0);
 #if ESP_LWIP_LOCK
@@ -389,7 +403,7 @@ sock_inc_used_locked(struct lwip_sock *sock)
   LWIP_ASSERT("sock->fd_used != 0", sock->fd_used != 0);
 #if ESP_LWIP_LOCK
   SYS_ARCH_UNPROTECT_SOCK(sock);
-#endif /* ESP_LWIP_LOCK */ 
+#endif /* ESP_LWIP_LOCK */
   return 1;
 }
 
@@ -407,7 +421,7 @@ done_socket(struct lwip_sock *sock)
   union lwip_sock_lastdata lastdata;
 #if !ESP_LWIP_LOCK
   SYS_ARCH_DECL_PROTECT(lev);
-#endif /* !ESP_LWIP_LOCK */ 
+#endif /* !ESP_LWIP_LOCK */
   LWIP_ASSERT("sock != NULL", sock != NULL);
 
 #if ESP_LWIP_LOCK
@@ -426,7 +440,7 @@ done_socket(struct lwip_sock *sock)
   }
 #if ESP_LWIP_LOCK
   SYS_ARCH_UNPROTECT_SOCK(sock);
-#else 
+#else
   SYS_ARCH_UNPROTECT(lev);
 #endif /* ESP_LWIP_LOCK */
 
@@ -482,10 +496,10 @@ tryget_socket_unconn_locked(int fd)
 {
   struct lwip_sock *ret = tryget_socket_unconn_nouse(fd);
   if (ret != NULL) {
-#if ESP_LWIP      
+#if ESP_LWIP
     if (ret->conn == NULL)
       return NULL;
-#endif /* ESP_LWIP */         
+#endif /* ESP_LWIP */
     if (!sock_inc_used_locked(ret)) {
       return NULL;
     }
@@ -526,7 +540,7 @@ get_socket(int fd)
     if ((fd < LWIP_SOCKET_OFFSET) || (fd >= (LWIP_SOCKET_OFFSET + NUM_SOCKETS))) {
       LWIP_DEBUGF(SOCKETS_DEBUG, ("get_socket(%d): invalid\n", fd));
     }
-    set_errno(EBADF);
+    _set_errno(EBADF);
     return NULL;
   }
   return sock;
@@ -661,7 +675,7 @@ free_socket(struct lwip_sock *sock, int is_tcp)
   freed = free_socket_locked(sock, is_tcp, &conn, &lastdata);
 #if ESP_LWIP_LOCK
   SYS_ARCH_UNPROTECT_SOCK(sock);
-#else 
+#else
   SYS_ARCH_UNPROTECT(lev);
 #endif /* ESP_LWIP_LOCK */
   /* don't use 'sock' after this line, as another task might have allocated it */
@@ -865,7 +879,7 @@ lwip_close(int s)
   }
 
   free_socket(sock, is_tcp);
-  set_errno(0);
+  _set_errno(0);
   return 0;
 }
 
@@ -918,6 +932,7 @@ lwip_connect(int s, const struct sockaddr *name, socklen_t namelen)
 
   if (err != ERR_OK) {
     LWIP_DEBUGF(SOCKETS_DEBUG, ("lwip_connect(%d) failed, err=%d\n", s, err));
+    sock_set_errno(sock, err);
     sock_set_errno(sock, err_to_errno(err));
     done_socket(sock);
     return -1;
@@ -1347,10 +1362,10 @@ lwip_recvmsg(int s, struct msghdr *message, int flags)
   LWIP_DEBUGF(SOCKETS_DEBUG, ("lwip_recvmsg(%d, message=%p, flags=0x%x)\n", s, (void *)message, flags));
   LWIP_ERROR("lwip_recvmsg: invalid message pointer", message != NULL, return ERR_ARG;);
   LWIP_ERROR("lwip_recvmsg: unsupported flags", (flags & ~(MSG_PEEK|MSG_DONTWAIT)) == 0,
-             set_errno(EOPNOTSUPP); return -1;);
+             _set_errno(EOPNOTSUPP); return -1;);
 
   if ((message->msg_iovlen <= 0) || (message->msg_iovlen > IOV_MAX)) {
-    set_errno(EMSGSIZE);
+    _set_errno(EMSGSIZE);
     return -1;
   }
 
@@ -1472,7 +1487,13 @@ lwip_send(int s, const void *data, size_t size, int flags)
   err = netconn_write_partly(sock->conn, data, size, write_flags, &written);
 
   LWIP_DEBUGF(SOCKETS_DEBUG, ("lwip_send(%d) err=%d written=%"SZT_F"\n", s, err, written));
-  sock_set_errno(sock, err_to_errno(err));
+  if (err && (err != ERR_WOULDBLOCK)) {
+    sock_set_errno(sock,err);
+    sock_set_errno(sock, err_to_errno(err));
+  } else {
+    set_errno(err);
+    set_errno(err_to_errno(err));
+  }
   done_socket(sock);
   /* casting 'written' to ssize_t is OK here since the netconn API limits it to SSIZE_MAX */
   return (err == ERR_OK ? (ssize_t)written : -1);
@@ -1731,11 +1752,14 @@ lwip_sendto(int s, const void *data, size_t size, int flags,
 
     /* send the data */
     err = netconn_send(sock->conn, &buf);
+    sock_set_errno(sock, err);
   }
 
   /* deallocated the buffer */
   netbuf_free(&buf);
 
+
+  sock_set_errno(sock, err);
   sock_set_errno(sock, err_to_errno(err));
   done_socket(sock);
   return (err == ERR_OK ? short_size : -1);
@@ -1778,13 +1802,13 @@ lwip_socket(int domain, int type, int protocol)
     default:
       LWIP_DEBUGF(SOCKETS_DEBUG, ("lwip_socket(%d, %d/UNKNOWN, %d) = -1\n",
                                   domain, type, protocol));
-      set_errno(EINVAL);
+      _set_errno(EINVAL);
       return -1;
   }
 
   if (!conn) {
     LWIP_DEBUGF(SOCKETS_DEBUG, ("-1 / ENOBUFS (could not create netconn)\n"));
-    set_errno(ENOBUFS);
+    _set_errno(ENOBUFS);
     return -1;
   }
 
@@ -1792,13 +1816,13 @@ lwip_socket(int domain, int type, int protocol)
 
   if (i == -1) {
     netconn_delete(conn);
-    set_errno(ENFILE);
+    _set_errno(ENFILE);
     return -1;
   }
   conn->socket = i;
   done_socket(&sockets[i - LWIP_SOCKET_OFFSET]);
   LWIP_DEBUGF(SOCKETS_DEBUG, ("%d\n", i));
-  set_errno(0);
+  _set_errno(0);
   return i;
 }
 
@@ -2044,7 +2068,7 @@ lwip_select(int maxfdp1, fd_set *readset, fd_set *writeset, fd_set *exceptset,
                               timeout ? (s32_t)timeout->tv_usec : (s32_t) - 1));
 
   if ((maxfdp1 < 0) || (maxfdp1 > LWIP_SELECT_MAXNFDS)) {
-    set_errno(EINVAL);
+    _set_errno(EINVAL);
     return -1;
   }
 
@@ -2056,7 +2080,7 @@ lwip_select(int maxfdp1, fd_set *readset, fd_set *writeset, fd_set *exceptset,
 
   if (nready < 0) {
     /* one of the sockets in one of the fd_sets was invalid */
-    set_errno(EBADF);
+    _set_errno(EBADF);
     lwip_select_dec_sockets_used(maxfdp1, &used_sockets);
     return -1;
   } else if (nready > 0) {
@@ -2075,7 +2099,7 @@ lwip_select(int maxfdp1, fd_set *readset, fd_set *writeset, fd_set *exceptset,
          to use local variables (unless we're running in MPU compatible
          mode). */
       API_SELECT_CB_VAR_DECLARE(select_cb);
-      API_SELECT_CB_VAR_ALLOC(select_cb, set_errno(ENOMEM); lwip_select_dec_sockets_used(maxfdp1, &used_sockets); return -1);
+      API_SELECT_CB_VAR_ALLOC(select_cb, _set_errno(ENOMEM); lwip_select_dec_sockets_used(maxfdp1, &used_sockets); return -1);
       memset(&API_SELECT_CB_VAR_REF(select_cb), 0, sizeof(struct lwip_select_cb));
 
       API_SELECT_CB_VAR_REF(select_cb).readset = readset;
@@ -2086,7 +2110,7 @@ lwip_select(int maxfdp1, fd_set *readset, fd_set *writeset, fd_set *exceptset,
 #else /* LWIP_NETCONN_SEM_PER_THREAD */
       if (sys_sem_new(&API_SELECT_CB_VAR_REF(select_cb).sem, 0) != ERR_OK) {
         /* failed to create semaphore */
-        set_errno(ENOMEM);
+        _set_errno(ENOMEM);
         lwip_select_dec_sockets_used(maxfdp1, &used_sockets);
         API_SELECT_CB_VAR_FREE(select_cb);
         return -1;
@@ -2113,7 +2137,7 @@ lwip_select(int maxfdp1, fd_set *readset, fd_set *writeset, fd_set *exceptset,
               maxfdp2 = i;
               SYS_ARCH_UNPROTECT(lev);
               done_socket(sock);
-              set_errno(EBUSY);
+              _set_errno(EBUSY);
               break;
             }
             SYS_ARCH_UNPROTECT(lev);
@@ -2123,7 +2147,7 @@ lwip_select(int maxfdp1, fd_set *readset, fd_set *writeset, fd_set *exceptset,
             nready = -1;
             maxfdp2 = i;
             SYS_ARCH_UNPROTECT(lev);
-            set_errno(EBADF);
+            _set_errno(EBADF);
             break;
           }
         }
@@ -2134,7 +2158,7 @@ lwip_select(int maxfdp1, fd_set *readset, fd_set *writeset, fd_set *exceptset,
            the last scan (without us on the list) and putting us on the list! */
         nready = lwip_selscan(maxfdp1, readset, writeset, exceptset, &lreadset, &lwriteset, &lexceptset);
         if (nready < 0) {
-          set_errno(EBADF);
+          _set_errno(EBADF);
         } else if (!nready) {
           /* Still none ready, just wait to be woken */
           if (timeout == 0) {
@@ -2177,7 +2201,7 @@ lwip_select(int maxfdp1, fd_set *readset, fd_set *writeset, fd_set *exceptset,
             SYS_ARCH_UNPROTECT(lev);
             /* Not a valid socket */
             nready = -1;
-            set_errno(EBADF);
+            _set_errno(EBADF);
           }
         }
       }
@@ -2210,7 +2234,7 @@ lwip_select(int maxfdp1, fd_set *readset, fd_set *writeset, fd_set *exceptset,
         nready = lwip_selscan(maxfdp1, readset, writeset, exceptset, &lreadset, &lwriteset, &lexceptset);
         LWIP_DEBUGF(SOCKETS_DEBUG, ("lwip_select: nready=%d\n", nready));
         if (nready < 0) {
-          set_errno(EBADF);
+          _set_errno(EBADF);
           lwip_select_dec_sockets_used(maxfdp1, &used_sockets);
           return -1;
         }
@@ -2219,7 +2243,7 @@ lwip_select(int maxfdp1, fd_set *readset, fd_set *writeset, fd_set *exceptset,
   }
 
   lwip_select_dec_sockets_used(maxfdp1, &used_sockets);
-  set_errno(0);
+  _set_errno(0);
   if (readset) {
     *readset = lreadset;
   }
@@ -2395,7 +2419,7 @@ lwip_poll(struct pollfd *fds, nfds_t nfds, int timeout)
   LWIP_DEBUGF(SOCKETS_DEBUG, ("lwip_poll(%p, %d, %d)\n",
                   (void*)fds, (int)nfds, timeout));
   LWIP_ERROR("lwip_poll: invalid fds", ((fds != NULL && nfds > 0) || (fds == NULL && nfds == 0)),
-             set_errno(EINVAL); return -1;);
+             _set_errno(EINVAL); return -1;);
 
   lwip_poll_inc_sockets_used(fds, nfds);
 
@@ -2416,7 +2440,7 @@ lwip_poll(struct pollfd *fds, nfds_t nfds, int timeout)
       LWIP_DEBUGF(SOCKETS_DEBUG, ("lwip_poll: no timeout, returning 0\n"));
       goto return_success;
     }
-    API_SELECT_CB_VAR_ALLOC(select_cb, set_errno(EAGAIN); lwip_poll_dec_sockets_used(fds, nfds); return -1);
+    API_SELECT_CB_VAR_ALLOC(select_cb, _set_errno(EAGAIN); lwip_poll_dec_sockets_used(fds, nfds); return -1);
     memset(&API_SELECT_CB_VAR_REF(select_cb), 0, sizeof(struct lwip_select_cb));
 
     /* None ready: add our semaphore to list:
@@ -2431,7 +2455,7 @@ lwip_poll(struct pollfd *fds, nfds_t nfds, int timeout)
 #else /* LWIP_NETCONN_SEM_PER_THREAD */
     if (sys_sem_new(&API_SELECT_CB_VAR_REF(select_cb).sem, 0) != ERR_OK) {
       /* failed to create semaphore */
-      set_errno(EAGAIN);
+      _set_errno(EAGAIN);
       lwip_poll_dec_sockets_used(fds, nfds);
       API_SELECT_CB_VAR_FREE(select_cb);
       return -1;
@@ -2493,7 +2517,7 @@ lwip_poll(struct pollfd *fds, nfds_t nfds, int timeout)
   LWIP_DEBUGF(SOCKETS_DEBUG, ("lwip_poll: nready=%d\n", nready));
 return_success:
   lwip_poll_dec_sockets_used(fds, nfds);
-  set_errno(0);
+  _set_errno(0);
   return nready;
 }
 
@@ -2573,9 +2597,9 @@ event_callback(struct netconn *conn, enum netconn_evt evt, u16_t len)
     }
 #if ESP_LWIP_LOCK
     sock = tryget_socket_unconn_nouse(s);
-#else    
+#else
     sock = get_socket(s);
-#endif /* ESP_LWIP_LOCK */    
+#endif /* ESP_LWIP_LOCK */
     if (!sock) {
       return;
     }
@@ -2625,15 +2649,15 @@ event_callback(struct netconn *conn, enum netconn_evt evt, u16_t len)
     /* Check any select calls waiting on this socket */
 #if ESP_LWIP_SELECT
     select_check_waiters(s, has_recvevent, has_sendevent, has_errevent, sock);
-#else    
+#else
     select_check_waiters(s, has_recvevent, has_sendevent, has_errevent);
-#endif/* LWIP_SOCKET_SELECT */   
-  } else {       
+#endif/* LWIP_SOCKET_SELECT */
+  } else {
     SYS_ARCH_UNPROTECT(lev);
   }
-#if !ESP_LWIP_LOCK  
+#if !ESP_LWIP_LOCK
    done_socket(sock);
-#endif /* !ESP_LWIP_LOCK */  
+#endif /* !ESP_LWIP_LOCK */
 }
 
 /**
@@ -2658,9 +2682,9 @@ static void select_check_waiters(int s, int has_recvevent, int has_sendevent, in
   struct lwip_select_cb *scb;
 #if ESP_LWIP_SELECT
   struct lwip_sock *sock = sock_select;
-#else  
+#else
   struct lwip_sock *sock
-#endif /* ESP_LWIP_LOCK */ 
+#endif /* ESP_LWIP_LOCK */
 #if !LWIP_TCPIP_CORE_LOCKING
   int last_select_cb_ctr;
   SYS_ARCH_DECL_PROTECT(lev);
@@ -2688,29 +2712,29 @@ again:
 #if LWIP_SOCKET_SELECT
       {
         /* Test this select call for our socket */
-#if ESP_LWIP_SELECT         
+#if ESP_LWIP_SELECT
         if (sock->rcvevent) {
-#else            
+#else
         if (has_recvevent) {
-#endif/* ESP_LWIP_SELECT */                 
+#endif/* ESP_LWIP_SELECT */
           if (scb->readset && FD_ISSET(s, scb->readset)) {
             do_signal = 1;
           }
         }
-#if ESP_LWIP_SELECT         
+#if ESP_LWIP_SELECT
         if (sock->sendevent) {
-#else        
+#else
         if (has_sendevent) {
-#endif/* ESP_LWIP_SELECT */            
+#endif/* ESP_LWIP_SELECT */
           if (!do_signal && scb->writeset && FD_ISSET(s, scb->writeset)) {
             do_signal = 1;
           }
         }
-#if ESP_LWIP_SELECT         
+#if ESP_LWIP_SELECT
         if (sock->errevent) {
-#else        
+#else
         if (has_errevent) {
-#endif/* ESP_LWIP_SELECT */            
+#endif/* ESP_LWIP_SELECT */
           if (!do_signal && scb->exceptset && FD_ISSET(s, scb->exceptset)) {
             do_signal = 1;
           }
@@ -3760,7 +3784,7 @@ lwip_setsockopt_impl(int s, int level, int optname, const void *optval, socklen_
           udp_setflags(sock->conn->pcb.udp, udp_flags(sock->conn->pcb.udp) & ~UDP_FLAGS_MULTICAST_LOOP);
           }
           break;
-#endif/* ESP_IPV6 */          
+#endif/* ESP_IPV6 */
 #if LWIP_IPV6_MLD
         case IPV6_JOIN_GROUP:
         case IPV6_LEAVE_GROUP: {
@@ -4071,7 +4095,7 @@ lwip_inet_ntop(int af, const void *src, char *dst, socklen_t size)
   const char *ret = NULL;
   int size_int = (int)size;
   if (size_int < 0) {
-    set_errno(ENOSPC);
+    _set_errno(ENOSPC);
     return NULL;
   }
   switch (af) {
@@ -4079,7 +4103,7 @@ lwip_inet_ntop(int af, const void *src, char *dst, socklen_t size)
     case AF_INET:
       ret = ip4addr_ntoa_r((const ip4_addr_t *)src, dst, size_int);
       if (ret == NULL) {
-        set_errno(ENOSPC);
+        _set_errno(ENOSPC);
       }
       break;
 #endif
@@ -4087,12 +4111,12 @@ lwip_inet_ntop(int af, const void *src, char *dst, socklen_t size)
     case AF_INET6:
       ret = ip6addr_ntoa_r((const ip6_addr_t *)src, dst, size_int);
       if (ret == NULL) {
-        set_errno(ENOSPC);
+        _set_errno(ENOSPC);
       }
       break;
 #endif
     default:
-      set_errno(EAFNOSUPPORT);
+      _set_errno(EAFNOSUPPORT);
       break;
   }
   return ret;
@@ -4122,7 +4146,7 @@ lwip_inet_pton(int af, const char *src, void *dst)
 #endif
     default:
       err = -1;
-      set_errno(EAFNOSUPPORT);
+      _set_errno(EAFNOSUPPORT);
       break;
   }
   return err;

@@ -42,6 +42,7 @@
  * This file is part of the lwIP TCP/IP stack.
  *
  */
+//#define PACKET_TRACING
 
 #include "lwip/opt.h"
 
@@ -443,6 +444,9 @@ etharp_update_arp_entry(struct netif *netif, const ip4_addr_t *ipaddr, struct et
               ip4_addr1_16(ipaddr), ip4_addr2_16(ipaddr), ip4_addr3_16(ipaddr), ip4_addr4_16(ipaddr),
               (u16_t)ethaddr->addr[0], (u16_t)ethaddr->addr[1], (u16_t)ethaddr->addr[2],
               (u16_t)ethaddr->addr[3], (u16_t)ethaddr->addr[4], (u16_t)ethaddr->addr[5]));
+#ifdef PACKET_TRACING
+  printf("u");
+#endif
   /* non-unicast address? */
   if (ip4_addr_isany(ipaddr) ||
       ip4_addr_isbroadcast(ipaddr, netif) ||
@@ -768,6 +772,9 @@ etharp_output_to_arp_index(struct netif *netif, struct pbuf *q, netif_addr_idx_t
   /* if arp table entry is about to expire: re-request it,
      but only if its state is ETHARP_STATE_STABLE to prevent flooding the
      network with ARP requests if this address is used frequently. */
+#ifdef PACKET_TRACING
+  printf("i");
+#endif
   if (arp_table[arp_idx].state == ETHARP_STATE_STABLE) {
     if (arp_table[arp_idx].ctime >= ARP_AGE_REREQUEST_USED_BROADCAST) {
       /* issue a standard request using broadcast */
@@ -814,6 +821,9 @@ etharp_output(struct netif *netif, struct pbuf *q, const ip4_addr_t *ipaddr)
   LWIP_ASSERT("netif != NULL", netif != NULL);
   LWIP_ASSERT("q != NULL", q != NULL);
   LWIP_ASSERT("ipaddr != NULL", ipaddr != NULL);
+#ifdef PACKET_TRACING
+  printf("+");
+#endif
 
   /* Determine on destination hardware address. Broadcasts and multicasts
    * are special, other IP addresses are looked up in the ARP table. */
@@ -954,6 +964,9 @@ etharp_query(struct netif *netif, const ip4_addr_t *ipaddr, struct pbuf *q)
   s16_t i_err;
   netif_addr_idx_t i;
 
+#ifdef PACKET_TRACING
+  printf("q");
+#endif
   /* non-unicast address? */
   if (ip4_addr_isbroadcast(ipaddr, netif) ||
       ip4_addr_ismulticast(ipaddr) ||
@@ -1064,7 +1077,7 @@ etharp_query(struct netif *netif, const ip4_addr_t *ipaddr, struct pbuf *q)
         }
 #if ARP_QUEUE_LEN
         if (qlen >= ARP_QUEUE_LEN) {
-#if ESP_LWIP_ARP 
+#if ESP_LWIP_ARP
           r->next = NULL;
           pbuf_free(new_entry->p);
           memp_free(MEMP_ARP_QUEUE, new_entry);
@@ -1134,6 +1147,9 @@ etharp_raw(struct netif *netif, const struct eth_addr *ethsrc_addr,
 
   LWIP_ASSERT("netif != NULL", netif != NULL);
 
+#ifdef PACKET_TRACING
+  printf("r");
+#endif
   /* allocate a pbuf for the outgoing ARP request packet */
   p = pbuf_alloc(PBUF_LINK, SIZEOF_ETHARP_HDR, PBUF_RAM);
   /* could allocate a pbuf for an ARP request? */

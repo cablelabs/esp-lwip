@@ -38,6 +38,7 @@
  *
  */
 
+//#define PACKET_TRACING
 #include "lwip/opt.h"
 
 #if LWIP_ARP || LWIP_ETHERNET
@@ -272,7 +273,9 @@ ethernet_output(struct netif * netif, struct pbuf * p,
                 u16_t eth_type) {
   struct eth_hdr *ethhdr;
   u16_t eth_type_be = lwip_htons(eth_type);
-
+#ifdef PACKET_TRACING
+  printf(".");
+#endif
 #if ETHARP_SUPPORT_VLAN && defined(LWIP_HOOK_VLAN_SET)
   s32_t vlan_prio_vid = LWIP_HOOK_VLAN_SET(netif, p, src, dst, eth_type);
   if (vlan_prio_vid >= 0) {
